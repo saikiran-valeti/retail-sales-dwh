@@ -1,0 +1,46 @@
+name: Databricks ETL Deployment Pipeline
+
+# Trigger the workflow only on pushes to the main branch
+on:
+  push:
+    branches:
+      - main
+    # Only trigger if files in the src directory change
+    paths:
+      - 'src/**'
+
+jobs:
+  deploy-to-databricks:
+    name: Sync Code to Workspace
+    runs-on: ubuntu-latest
+
+    # Pull credentials securely from GitHub Secrets
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+    steps:
+      # Step 1: Check out the repository code onto the runner
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # Step 2: Set up a Python environment
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # Step 3: Install the Databricks CLI
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/setup.sh | sh
+
+      # Step 4: Sync the local src/ folder to the Databricks Workspace
+      - name: Deploy Scripts to Databricks Workspace
+        run: |
+          echo "Syncing local ./src directory to Databricks /Workspace/Shared/Retail-DWH"
+          
+          # Using the Databricks CLI to synchronize directories
+          databricks sync ./src /Workspace/Shared/Retail-DWH
+          
+          echo "Deployment Successful! ✅"

@@ -53,12 +53,16 @@ def archive_old_files(zone_path: str, archive_path: str):
         raise e
 
 # --- Execution ---
-# Replace with your actual S3 bucket path
 S3_BUCKET = "s3://retail-dwh-project-bucket"
 archive_destination = f"{S3_BUCKET}/archive/"
 
-# Run across all active zones
-zones_to_clean = [f"{S3_BUCKET}/sftp/", f"{S3_BUCKET}/raw/", f"{S3_BUCKET}/processed/"]
+# Updated to reflect the Medallion Architecture zones
+zones_to_clean = [
+    f"{S3_BUCKET}/sftp/", 
+    f"{S3_BUCKET}/bronze/", 
+    f"{S3_BUCKET}/silver/",
+    f"{S3_BUCKET}/gold/"
+]
 
 for zone in zones_to_clean:
     print(f"\nScanning Zone: {zone}")

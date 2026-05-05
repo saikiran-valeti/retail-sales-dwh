@@ -24,4 +24,4 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
-          databricks repos update "/Workspace/Retail_Sales_DWH/retail-sales-dwh" --branch main
+          databricks repos update "/Workspace/Retail_Sales_DWH/retail-sales-dwh" --branch main 

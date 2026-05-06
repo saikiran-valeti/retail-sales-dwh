@@ -1,20 +1,13 @@
--- ==========================================
--- 02_silver_layer_dimensions.sql
--- ==========================================
 
--- ------------------------------------------
--- 1. Silver DimProduct (Static Dimension)
--- ------------------------------------------
-DROP TABLE IF EXISTS silver.DimProduct;
+USE CATALOG retail_project;
+USE SCHEMA silver;
 
-CREATE TABLE silver.DimProduct (
-    ProductSK BIGINT GENERATED ALWAYS AS IDENTITY,
-    ProductID STRING,  
-    ProductName STRING,
-    Category STRING,
-    UnitPrice DECIMAL(10,2),
-    EffectiveDate DATE
-) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimProduct_v2'; -- FIX: New S3 path
+-- Use existing table if it exists (infer schema from existing Delta files)
+CREATE TABLE IF NOT EXISTS silver.DimProduct
+USING DELTA 
+LOCATION 's3://retail-dwh-project-bucket/silver/DimProduct';
+
+-- INSERT OVERWRITE completely replaces the data every day 
 
 INSERT OVERWRITE silver.DimProduct (ProductID, ProductName, Category, UnitPrice, EffectiveDate)
 SELECT 
@@ -28,14 +21,12 @@ FROM bronze.products;
 -- ------------------------------------------
 -- 2. Silver DimStore (Static Dimension)
 -- ------------------------------------------
-DROP TABLE IF EXISTS silver.DimStore;
-
-CREATE TABLE silver.DimStore (
+CREATE TABLE IF NOT EXISTS silver.DimStore (
     StoreSK BIGINT GENERATED ALWAYS AS IDENTITY,
     StoreID STRING,  
     StoreName STRING,
     Region STRING
-) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimStore_v2'; -- FIX: New S3 path
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimStore';
 
 INSERT OVERWRITE silver.DimStore (StoreID, StoreName, Region)
 SELECT 
@@ -47,9 +38,7 @@ FROM bronze.stores;
 -- ------------------------------------------
 -- 3. Silver DimCustomer (SCD Type 2)
 -- ------------------------------------------
-DROP TABLE IF EXISTS silver.DimCustomer;
-
-CREATE TABLE silver.DimCustomer (
+CREATE TABLE IF NOT EXISTS silver.DimCustomer (
     CustomerSK BIGINT GENERATED ALWAYS AS IDENTITY,
     CustomerID INT,
     CustomerName STRING,
@@ -59,9 +48,9 @@ CREATE TABLE silver.DimCustomer (
     StartDate DATE,
     EndDate DATE,
     IsActive INT
-) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimCustomer_v2'; -- FIX: New S3 path
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimCustomer';
 
--- SCD2 STEP A
+-- SCD2 STEP A: Expire existing records if their City or Address changed
 UPDATE silver.DimCustomer tgt
 SET tgt.IsActive = 0, tgt.EndDate = CURRENT_DATE()
 WHERE tgt.IsActive = 1 
@@ -71,7 +60,8 @@ WHERE tgt.IsActive = 1
         AND (TRIM(src.City) != tgt.City OR TRIM(src.Address) != tgt.Address)
   );
 
--- SCD2 STEP B
+-- SCD2 STEP B: Insert brand new customers AND the new active rows for updated customers
+
 INSERT INTO silver.DimCustomer (CustomerID, CustomerName, Email, City, Address, StartDate, EndDate, IsActive)
 SELECT 
     src.CustomerID,

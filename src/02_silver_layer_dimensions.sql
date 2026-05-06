@@ -2,10 +2,14 @@
 USE CATALOG retail_project;
 USE SCHEMA silver;
 
--- Use existing table if it exists (infer schema from existing Delta files)
-CREATE TABLE IF NOT EXISTS silver.DimProduct
-USING DELTA 
-LOCATION 's3://retail-dwh-project-bucket/silver/DimProduct';
+CREATE TABLE IF NOT EXISTS silver.DimProduct (
+    ProductSK BIGINT GENERATED ALWAYS AS IDENTITY,
+    ProductID STRING,
+    ProductName STRING,
+    Category STRING,
+    UnitPrice DECIMAL(10,2),
+    EffectiveDate DATE
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimProduct';
 
 -- INSERT OVERWRITE completely replaces the data every day 
 

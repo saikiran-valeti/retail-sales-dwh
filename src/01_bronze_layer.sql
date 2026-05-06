@@ -1,36 +1,87 @@
 -- ==========================================
 -- 01_bronze_layer.sql
--- Purpose: Schema creation & Raw Data Mapping
+-- Purpose: Merge SFTP raw files into Bronze Delta Tables
 -- ==========================================
 
--- 1. Create the Medallion schemas
-CREATE DATABASE IF NOT EXISTS bronze;
-CREATE DATABASE IF NOT EXISTS silver;
-CREATE DATABASE IF NOT EXISTS gold;
+USE CATALOG retail_project;
+USE SCHEMA bronze;
 
--- 2. Map S3 CSVs to Databricks Tables
--- We use DROP then CREATE because CSV format does not support the REPLACE command.
+-- Clear Metastore just in case
+DROP TABLE IF EXISTS customers;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS stores;
+DROP TABLE IF EXISTS sales;
 
--- Products
-DROP TABLE IF EXISTS bronze.products;
-CREATE TABLE bronze.products 
-USING CSV OPTIONS (header "true", inferSchema "true")
-LOCATION 's3://retail-dwh-project-bucket/bronze/products_src_20042026100105.csv';
+-- ------------------------------------------
+-- 1. Customers
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS customers (
+    CustomerID STRING,
+    CustomerName STRING,
+    Email STRING,
+    City STRING,
+    Address STRING,
+    LastUpdated STRING
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/bronze/customers';
 
--- Stores
-DROP TABLE IF EXISTS bronze.stores;
-CREATE TABLE bronze.stores 
-USING CSV OPTIONS (header "true", inferSchema "true")
-LOCATION 's3://retail-dwh-project-bucket/bronze/stores_src_20042026100107.csv';
+COPY INTO customers 
+FROM 's3://retail-dwh-project-bucket/sftp/'
+FILEFORMAT = CSV
+PATTERN = 'customers_src*.csv'
+FORMAT_OPTIONS ('header' = 'true')
+COPY_OPTIONS ('mergeSchema' = 'true');
 
--- Customers
-DROP TABLE IF EXISTS bronze.customers;
-CREATE TABLE bronze.customers 
-USING CSV OPTIONS (header "true", inferSchema "true")
-LOCATION 's3://retail-dwh-project-bucket/bronze/customers_src_20042026100105.csv';
+-- Delete rows with null CustomerID
+DELETE FROM customers WHERE CustomerID IS NULL;
 
--- Sales
-DROP TABLE IF EXISTS bronze.sales;
-CREATE TABLE bronze.sales 
-USING CSV OPTIONS (header "true", inferSchema "true")
-LOCATION 's3://retail-dwh-project-bucket/bronze/sales_transactions_src_20042026100107.csv';
+-- ------------------------------------------
+-- 2. Products
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS products (
+    ProductID STRING, 
+    ProductName STRING,
+    Category STRING,
+    UnitPrice STRING
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/bronze/products';
+
+COPY INTO products 
+FROM 's3://retail-dwh-project-bucket/sftp/'
+FILEFORMAT = CSV
+PATTERN = 'products_src*.csv'
+FORMAT_OPTIONS ('header' = 'true');
+
+-- ------------------------------------------
+-- 3. Stores
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS stores (
+    StoreID STRING,  
+    StoreName STRING,
+    Region STRING
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/bronze/stores';
+
+COPY INTO stores 
+FROM 's3://retail-dwh-project-bucket/sftp/'
+FILEFORMAT = CSV
+PATTERN = 'stores_src*.csv'
+FORMAT_OPTIONS ('header' = 'true');
+
+-- ------------------------------------------
+-- 4. Sales
+-- ------------------------------------------
+CREATE TABLE IF NOT EXISTS sales (
+    TransactionID STRING,
+    CustomerID STRING,
+    ProductID STRING,
+    StoreID STRING,
+    Quantity STRING,
+    TxnDate STRING
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/bronze/sales';
+
+COPY INTO sales 
+FROM 's3://retail-dwh-project-bucket/sftp/'
+FILEFORMAT = CSV
+PATTERN = 'sales_transactions_src*.csv'
+FORMAT_OPTIONS ('header' = 'true');
+
+-- Delete rows with null CustomerID
+DELETE FROM sales WHERE CustomerID IS NULL;

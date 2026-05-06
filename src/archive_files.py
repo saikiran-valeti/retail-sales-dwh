@@ -1,118 +1,107 @@
 import re
 from datetime import datetime
 
-def archive_versioned_files(zone_path: str, archive_path: str):
+def extract_date_from_filename(filename: str):
     """
-    For landing zones (like SFTP): Keeps the newest file of each type based on timestamp,
-    and moves older files to the archive path.
+    Extracts date from filename pattern: tablename_src_DDMMYYYYHHMMSS.csv
+    Returns datetime.date object or None if pattern doesn't match.
+    """
+    # Pattern to match: _src_DDMMYYYYHHMMSS.csv (capture DDMMYYYY)
+    pattern = r'_src_(\d{8})\d{6}\.csv$'
+    match = re.search(pattern, filename)
+    
+    if match:
+        date_str = match.group(1)  # DDMMYYYY
+        try:
+            # Parse DDMMYYYY format
+            file_date = datetime.strptime(date_str, '%d%m%Y').date()
+            return file_date
+        except ValueError:
+            return None
+    return None
+
+def archive_sftp_files(sftp_path: str, archive_path: str):
+    """
+    Moves OLD files from the SFTP landing zone to a timestamped 
+    archive folder when NEW files are uploaded. Keeps new files 
+    in the landing zone for processing.
+    
+    Date detection is based on filename pattern (tablename_src_DDMMYYYYHHMMSS.csv),
+    NOT file modification time.
     """
     try:
-        files = dbutils.fs.ls(zone_path)
-        file_groups = {}
+        files = dbutils.fs.ls(sftp_path)
         
-        # Regex to extract base name and timestamp (e.g., customers_src_20042026100105.csv)
-        pattern = re.compile(r"(.+)_(\d{14})\.csv$")
+        if not files:
+            print(f"ℹ️ No files found in {sftp_path}. SFTP zone is empty.")
+            return
+        
+        # Get today's date (without time component)
+        today = datetime.now().date()
+        
+        # Separate files into new (today) and old (before today)
+        new_files = []
+        old_files = []
+        skipped_files = []
         
         for file in files:
-            # Skip directories
             if file.isDir():
                 continue
-                
-            match = pattern.search(file.name)
-            if match:
-                base_name = match.group(1)       
-                timestamp_str = match.group(2)   
-                
-                file_time = datetime.strptime(timestamp_str, "%d%m%Y%H%M%S")
-                
-                if base_name not in file_groups:
-                    file_groups[base_name] = []
-                
-                file_groups[base_name].append({
-                    "file_name": file.name,
-                    "path": file.path,
-                    "timestamp": file_time
-                })
-
-        # Process each group to find the latest file and archive the rest
-        for base_name, file_list in file_groups.items():
-            file_list.sort(key=lambda x: x["timestamp"], reverse=True)
             
-            # Keep the newest file
-            latest_file = file_list[0]
-            print(f"✅ Keeping active file: {latest_file['file_name']}")
+            # Extract date from filename
+            file_date = extract_date_from_filename(file.name)
             
-            # Move all older files to the archive zone
-            older_files = file_list[1:]
-            for old_file in older_files:
-                source = old_file["path"]
-                destination = f"{archive_path}{old_file['file_name']}"
-                
-                print(f"📦 Archiving old version: {old_file['file_name']} -> {archive_path}")
-                dbutils.fs.mv(source, destination)
-
-    except Exception as e:
-        # Fails gracefully if the folder doesn't exist yet
-        if "java.io.FileNotFoundException" in str(e):
-            print(f"ℹ️ Zone {zone_path} does not exist yet. Skipping.")
-        else:
-            print(f"🚨 ALERT: Archival process failed for zone {zone_path}. Error: {str(e)}")
-
-def archive_all_files(zone_path: str, archive_path: str):
-    """
-    For processing zones (like Bronze): Moves ALL files to a timestamped archive 
-    folder after processing to prevent the pipeline from reading them twice.
-    """
-    try:
-        files = dbutils.fs.ls(zone_path)
+            if file_date is None:
+                # File doesn't match expected pattern - skip it
+                skipped_files.append(file)
+                print(f"⚠️ Skipping {file.name} - doesn't match expected pattern")
+                continue
+            
+            if file_date == today:
+                new_files.append((file, file_date))
+            else:
+                old_files.append((file, file_date))
         
-        # Create a timestamped folder to keep archives organized
+        # Only archive old files if there are new files uploaded today
+        if not new_files:
+            print(f"ℹ️ No new files uploaded today. Skipping archival.")
+            if old_files:
+                print(f"   ({len(old_files)} old file(s) remain in landing zone)")
+            return
+        
+        if not old_files:
+            print(f"✅ {len(new_files)} new file(s) uploaded today. No old files to archive.")
+            return
+        
+        # Create a timestamped folder for archival
         timestamp_folder = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         target_archive_dir = f"{archive_path}{timestamp_folder}/"
         
-        files_moved = False
+        print(f"📦 New files detected ({len(new_files)}). Archiving {len(old_files)} old file(s)...")
         
-        for file in files:
-            if file.isDir():
-                continue
-                
+        # Archive only old files
+        for file, file_date in old_files:
             source = file.path
             destination = f"{target_archive_dir}{file.name}"
             
-            print(f"🧹 Clearing processed file: {file.name} -> {target_archive_dir}")
+            print(f"   📦 Archiving: {file.name} (date from filename: {file_date.strftime('%Y-%m-%d')}) -> archive/")
             dbutils.fs.mv(source, destination)
-            files_moved = True
-            
-        if not files_moved:
-            print(f"ℹ️ No files found to clean in {zone_path}.")
+        
+        print(f"✅ Archived {len(old_files)} old file(s). Kept {len(new_files)} new file(s) in landing zone.")
             
     except Exception as e:
         if "java.io.FileNotFoundException" in str(e):
-            print(f"ℹ️ Zone {zone_path} does not exist yet. Skipping.")
+            print(f"ℹ️ Zone {sftp_path} does not exist yet. Skipping.")
         else:
-            print(f"🚨 ALERT: Full archival failed for zone {zone_path}. Error: {str(e)}")
+            print(f"🚨 ALERT: Archival process failed. Error: {str(e)}")
 
 # ==========================================
 # --- Execution Block ---
 # ==========================================
 S3_BUCKET = "s3://retail-dwh-project-bucket"
+sftp_zone = f"{S3_BUCKET}/sftp/"
 archive_destination = f"{S3_BUCKET}/archive/"
 
-print("--- Starting Data Warehouse File Maintenance ---")
-
-# 1. Clean the Landing Zone (Keep the newest files)
-sftp_zone = f"{S3_BUCKET}/sftp/"
-print(f"\nScanning Landing Zone: {sftp_zone}")
-archive_versioned_files(sftp_zone, archive_destination)
-
-# 2. Clean the Bronze Zone (Move EVERYTHING so tomorrow starts fresh)
-bronze_zone = f"{S3_BUCKET}/bronze/"
-print(f"\nScanning Bronze Zone: {bronze_zone}")
-archive_all_files(bronze_zone, archive_destination)
-
-# NOTE: Silver and Gold are explicitly excluded from this script.
-# Databricks manages those Delta files automatically.
-# To clean old data from Silver/Gold, run this SQL command instead:
-# VACUUM silver.DimProduct RETAIN 168 HOURS;
-
-print("\n✅ File maintenance complete!")
+print("--- Starting SFTP Cleanup ---")
+archive_sftp_files(sftp_zone, archive_destination)
+print("✅ SFTP Cleanup complete!")

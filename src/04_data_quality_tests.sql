@@ -1,3 +1,10 @@
+-- ==========================================
+-- 04_data_quality_tests.sql
+-- Purpose: Data Quality Checks
+-- ==========================================
+
+USE CATALOG retail_project;
+
 -- Row Count --
 SELECT 
     (SELECT COUNT(*) FROM bronze.sales) AS Bronze_Raw_Sales_Count,

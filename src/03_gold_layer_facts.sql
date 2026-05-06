@@ -1,4 +1,8 @@
-CREATE TABLE IF NOT EXISTS gold.FactSales (
+-- 1. Drop the old table to start fresh
+DROP TABLE IF EXISTS gold.FactSales;
+
+-- 2. Create the Gold Fact Table (Using _v2 to avoid Delta schema mismatch errors)
+CREATE TABLE gold.FactSales (
     SalesSK BIGINT GENERATED ALWAYS AS IDENTITY,
     TransactionID INT,
     CustomerSK BIGINT,
@@ -7,27 +11,26 @@ CREATE TABLE IF NOT EXISTS gold.FactSales (
     Quantity INT,
     Amount DECIMAL(10,2),
     TxnDate DATE
-) USING DELTA LOCATION 's3://retail-dwh-project-bucket/gold/FactSales';
+) USING DELTA LOCATION 's3://retail-dwh-project-bucket/gold/FactSales_v2';
 
--- 2. Transform and Load the Facts
+-- 3. Transform and Load the Facts
 INSERT INTO gold.FactSales (TransactionID, CustomerSK, ProductSK, StoreSK, Quantity, Amount, TxnDate)
 SELECT 
-    s.TransactionID,
+    CAST(s.TransactionID AS INT),
     c.CustomerSK,
     p.ProductSK,
     st.StoreSK,
-    s.Quantity,
+    CAST(s.Quantity AS INT),
     CAST((s.Quantity * p.UnitPrice) AS DECIMAL(10,2)) AS Amount,
     CAST(s.TxnDate AS DATE) AS TxnDate
 FROM bronze.sales s
--- Join Product (Static)
+-- Bulletproofed Joins matching on TRIMMED STRINGS for Product and Store:
 LEFT JOIN silver.DimProduct p 
-    ON s.ProductID = p.ProductID
--- Join Store (Static)
+    ON TRIM(CAST(s.ProductID AS STRING)) = p.ProductID
 LEFT JOIN silver.DimStore st 
-    ON s.StoreID = st.StoreID
--- Join Customer (SCD Type 2 Time-Travel Join)
+    ON TRIM(CAST(s.StoreID AS STRING)) = st.StoreID
+-- Bulletproofed Join matching on INT for Customer + SCD Type 2 Date Logic:
 LEFT JOIN silver.DimCustomer c 
-    ON s.CustomerID = c.CustomerID 
+    ON CAST(TRIM(s.CustomerID) AS INT) = c.CustomerID 
     AND CAST(s.TxnDate AS DATE) >= c.StartDate 
     AND CAST(s.TxnDate AS DATE) <= c.EndDate;

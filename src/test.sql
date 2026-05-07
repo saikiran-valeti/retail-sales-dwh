@@ -15,3 +15,11 @@ UNION ALL
 SELECT 'dim_store',   COUNT(*), NULL FROM retail_project.silver.dimstore
 UNION ALL
 SELECT 'fact_sales',  COUNT(*), NULL FROM retail_project.gold.factsales;
+
+drop table silver.dimcustomer;
+drop table silver.dimproduct;
+drop table silver.dimstore;
+drop table gold.factsales;
+USE CATALOG retail_project;
+USE SCHEMA silver;
+

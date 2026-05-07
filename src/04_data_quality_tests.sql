@@ -43,3 +43,39 @@ JOIN silver.DimCustomer c
   ON f.CustomerSK = c.CustomerSK
 WHERE f.TxnDate < c.StartDate 
    OR f.TxnDate > c.EndDate;
+
+USE CATALOG retail_project;
+
+-- ------------------------------------------
+-- TEST 1: Uniqueness in Silver Dimensions
+-- ------------------------------------------
+-- A dimension table should never have duplicate active IDs.
+-- EXPECTED RESULT: 0 rows
+SELECT CustomerID, COUNT(*) 
+FROM silver.DimCustomer 
+WHERE IsActive = 1 
+GROUP BY CustomerID 
+HAVING COUNT(*) > 1;
+
+-- ------------------------------------------
+-- TEST 2: Null Checks in Gold Fact Table
+-- ------------------------------------------
+-- Sales amounts and foreign keys should never be null.
+-- EXPECTED RESULT: 0 rows
+SELECT * 
+FROM gold.FactSales 
+WHERE CustomerSK IS NULL 
+   OR ProductSK IS NULL 
+   OR Amount IS NULL;
+
+-- ------------------------------------------
+-- TEST 3: Mathematical Accuracy
+-- ------------------------------------------
+-- Does the total Amount equal Quantity * UnitPrice?
+-- EXPECTED RESULT: 0 rows
+SELECT f.TransactionID, f.Amount, (f.Quantity * p.UnitPrice) AS ExpectedAmount
+FROM gold.FactSales f
+JOIN silver.DimProduct p ON f.ProductSK = p.ProductSK
+WHERE f.Amount != (f.Quantity * p.UnitPrice);
+
+select * from silver.dimproduct;

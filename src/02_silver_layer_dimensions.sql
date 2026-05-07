@@ -1,7 +1,14 @@
+-- ==========================================
+-- 02_silver_layer_dimensions.sql
+-- Purpose: Clean, conform, and build Dimension tables (DUPLICATE PROOF)
+-- ==========================================
 
 USE CATALOG retail_project;
 USE SCHEMA silver;
 
+-- ------------------------------------------
+-- 1. Silver DimProduct (Static Dimension)
+-- ------------------------------------------
 CREATE TABLE IF NOT EXISTS silver.DimProduct (
     ProductSK BIGINT GENERATED ALWAYS AS IDENTITY,
     ProductID STRING,
@@ -11,8 +18,8 @@ CREATE TABLE IF NOT EXISTS silver.DimProduct (
     EffectiveDate DATE
 ) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimProduct';
 
--- INSERT OVERWRITE completely replaces the data every day 
-
+-- INSERT OVERWRITE replaces data daily. 
+-- QUALIFY ensures only 1 unique ProductID is selected from Bronze.
 INSERT OVERWRITE silver.DimProduct (ProductID, ProductName, Category, UnitPrice, EffectiveDate)
 SELECT 
     TRIM(CAST(ProductID AS STRING)), 
@@ -20,7 +27,9 @@ SELECT
     TRIM(Category),
     CAST(UnitPrice AS DECIMAL(10,2)),
     CURRENT_DATE() AS EffectiveDate
-FROM bronze.products;
+FROM bronze.products
+QUALIFY ROW_NUMBER() OVER (PARTITION BY TRIM(CAST(ProductID AS STRING)) ORDER BY ProductID) = 1;
+
 
 -- ------------------------------------------
 -- 2. Silver DimStore (Static Dimension)
@@ -32,12 +41,15 @@ CREATE TABLE IF NOT EXISTS silver.DimStore (
     Region STRING
 ) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimStore';
 
+-- QUALIFY ensures only 1 unique StoreID is selected from Bronze.
 INSERT OVERWRITE silver.DimStore (StoreID, StoreName, Region)
 SELECT 
     TRIM(CAST(StoreID AS STRING)), 
     TRIM(StoreName),
     TRIM(Region)
-FROM bronze.stores;
+FROM bronze.stores
+QUALIFY ROW_NUMBER() OVER (PARTITION BY TRIM(CAST(StoreID AS STRING)) ORDER BY StoreID) = 1;
+
 
 -- ------------------------------------------
 -- 3. Silver DimCustomer (SCD Type 2)
@@ -54,21 +66,28 @@ CREATE TABLE IF NOT EXISTS silver.DimCustomer (
     IsActive INT
 ) USING DELTA LOCATION 's3://retail-dwh-project-bucket/silver/DimCustomer';
 
+-- STEP 0: Create a Temporary View to hold perfectly clean, deduplicated Bronze customers.
+-- We do this because the UPDATE and INSERT steps both need to use this data, 
+-- and we only want to calculate the deduplication once!
+CREATE OR REPLACE TEMP VIEW clean_bronze_customers AS
+SELECT * 
+FROM bronze.customers
+QUALIFY ROW_NUMBER() OVER (PARTITION BY CustomerID ORDER BY CustomerID) = 1;
+
 -- SCD2 STEP A: Expire existing records if their City or Address changed
 UPDATE silver.DimCustomer tgt
 SET tgt.IsActive = 0, tgt.EndDate = CURRENT_DATE()
 WHERE tgt.IsActive = 1 
   AND EXISTS (
-      SELECT 1 FROM bronze.customers src 
-      WHERE src.CustomerID = tgt.CustomerID 
+      SELECT 1 FROM clean_bronze_customers src 
+      WHERE CAST(src.CustomerID AS INT) = tgt.CustomerID 
         AND (TRIM(src.City) != tgt.City OR TRIM(src.Address) != tgt.Address)
   );
 
 -- SCD2 STEP B: Insert brand new customers AND the new active rows for updated customers
-
 INSERT INTO silver.DimCustomer (CustomerID, CustomerName, Email, City, Address, StartDate, EndDate, IsActive)
 SELECT 
-    src.CustomerID,
+    CAST(src.CustomerID AS INT),
     INITCAP(TRIM(src.CustomerName)),
     LOWER(TRIM(src.Email)),
     TRIM(src.City),
@@ -76,7 +95,7 @@ SELECT
     CAST('1900-01-01' AS DATE),  
     CAST('9999-12-31' AS DATE),
     1
-FROM bronze.customers src
+FROM clean_bronze_customers src
 LEFT JOIN silver.DimCustomer tgt 
-  ON src.CustomerID = tgt.CustomerID AND tgt.IsActive = 1
+  ON CAST(src.CustomerID AS INT) = tgt.CustomerID AND tgt.IsActive = 1
 WHERE tgt.CustomerID IS NULL;

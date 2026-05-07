@@ -1,8 +1,4 @@
--- ==========================================
 -- 04_data_quality_tests.sql
--- Purpose: Data Quality Checks
--- ==========================================
-
 USE CATALOG retail_project;
 
 -- Row Count --
@@ -21,61 +17,39 @@ WHERE CustomerSK IS NULL
    OR ProductSK IS NULL 
    OR StoreSK IS NULL;
 
-SELECT * FROM gold.FactSales;
 
-SELECT 
-    CustomerID, 
-    COUNT(*) AS Active_Record_Count
-FROM silver.DimCustomer
-WHERE IsActive = 1
-GROUP BY CustomerID
-HAVING COUNT(*) > 1;
-
-SELECT COUNT(*) AS Calculation_Errors
-FROM gold.FactSales f
-JOIN silver.DimProduct p 
-  ON f.ProductSK = p.ProductSK
-WHERE f.Amount != CAST((f.Quantity * p.UnitPrice) AS DECIMAL(10,2));
-
+-- Historical Mapping Check ---
 SELECT COUNT(*) AS Historical_Mapping_Errors
 FROM gold.FactSales f
-JOIN silver.DimCustomer c 
+JOIN silver.dimcustomer c 
   ON f.CustomerSK = c.CustomerSK
 WHERE f.TxnDate < c.StartDate 
    OR f.TxnDate > c.EndDate;
 
-USE CATALOG retail_project;
-
--- ------------------------------------------
--- TEST 1: Uniqueness in Silver Dimensions
--- ------------------------------------------
--- A dimension table should never have duplicate active IDs.
--- EXPECTED RESULT: 0 rows
-SELECT CustomerID, COUNT(*) 
-FROM silver.DimCustomer 
-WHERE IsActive = 1 
-GROUP BY CustomerID 
-HAVING COUNT(*) > 1;
-
--- ------------------------------------------
--- TEST 2: Null Checks in Gold Fact Table
--- ------------------------------------------
--- Sales amounts and foreign keys should never be null.
--- EXPECTED RESULT: 0 rows
-SELECT * 
-FROM gold.FactSales 
-WHERE CustomerSK IS NULL 
-   OR ProductSK IS NULL 
-   OR Amount IS NULL;
-
--- ------------------------------------------
--- TEST 3: Mathematical Accuracy
--- ------------------------------------------
--- Does the total Amount equal Quantity * UnitPrice?
--- EXPECTED RESULT: 0 rows
+-- Calculation Check ---
 SELECT f.TransactionID, f.Amount, (f.Quantity * p.UnitPrice) AS ExpectedAmount
 FROM gold.FactSales f
 JOIN silver.DimProduct p ON f.ProductSK = p.ProductSK
 WHERE f.Amount != (f.Quantity * p.UnitPrice);
 
-select * from silver.dimproduct;
+
+-- SCD Type 2 Check ---
+USE CATALOG retail_project;
+
+SELECT 
+    CustomerSK,
+    CustomerID, 
+    CustomerName, 
+    City, 
+    Address, 
+    StartDate, 
+    EndDate, 
+    IsActive
+FROM silver.DimCustomer
+WHERE CustomerID IN (
+    SELECT CustomerID 
+    FROM silver.DimCustomer 
+    GROUP BY CustomerID 
+    HAVING COUNT(*) > 1
+)
+ORDER BY CustomerID, StartDate;

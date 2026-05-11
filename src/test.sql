@@ -25,3 +25,5 @@ drop table gold.factsales;
 USE CATALOG retail_project;
 USE SCHEMA silver;
 
+USE CATALOG retail_project;
+select * from gold.factsales;
